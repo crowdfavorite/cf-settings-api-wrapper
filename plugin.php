@@ -106,9 +106,6 @@ class CF_Settings {
 					$this->register_settings_sections_callback();
 					$this->register_settings_fields_callback();
 				}
-				else {
-					$this->register_error( 'Registrant Failure', $plugin_name, $plugin_data );
-				}
 			}
 			else {
 				$this->register_error( 'Unexpected Duplicate Plugin Name', $plugin_name, $plugin_data );
@@ -159,6 +156,14 @@ class CF_Settings {
 
 		foreach ( $registrant as $key => $val ) {
 			if ( ! $val && $key != 'current_settings' ) {
+				$this->register_error(
+					'Registrant Setup Failure',
+					$plugin_name,
+					array(
+						'failed step' => $key,
+						'settings data' => $plugin_data
+					)
+				);
 				return false;
 			}
 		}
@@ -586,11 +591,11 @@ class CF_Settings {
 		return ucwords( preg_replace( '/-_/', ' ', $this->registrant->name ) ) . ' Settings';
 	}
 
-	private function register_error( $type, $plugin_name, $data ) {
+	private function register_error( $msg, $plugin_name, $data ) {
 
 	}
 
-	private function register_warning( $type, $plugin_name, $data ) {
+	private function register_warning( $msg, $plugin_name, $data ) {
 
 	}
 
