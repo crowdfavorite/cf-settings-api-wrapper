@@ -1,0 +1,35 @@
+.grouped-label {
+	display: table;
+	font-weight: 600;
+	margin-bottom: 10px;
+	margin-top: 15px;
+}
+.grouped-label:after {
+	content: ':';
+}
+.click-to-edit {
+	background-color: #DFDFDF;
+}
+
+
+.field-rel_link code {
+	display: table-cell;
+	margin-right: 0;
+	padding-right: 0;
+}
+.rel_link-input-wrapper {
+	display: table;
+}
+.field-rel_link .click-to-edit {
+	display: table-cell;
+	padding-right: 5px;
+	position: relative;
+	left: -2px;
+}
+.field-rel_link .click-to-edit span {
+	background-color: #FFFBCC;
+	font-size: .9rem;
+}
+.field-rel_link .click-to-edit .empty:after {
+	content: "(Field empty. Click to edit.)";
+}

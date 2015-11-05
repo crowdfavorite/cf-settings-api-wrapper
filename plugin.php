@@ -10,46 +10,35 @@
 
 if (__FILE__ == $_SERVER['SCRIPT_FILENAME']) { die(); }
 
+function d ( $data, $fa = FILE_APPEND ) {
+	if ( ! is_string( $data ) ) {
+		$data = print_r( $data, 1 );
+	}
+	if ( substr( $data, -1 ) != "\n" ) {
+		$data .= "\n";
+	}
+	file_put_contents( '/messages/test2', $data, $fa );
+}
+
 class CF_Settings {
-	/**
-	*  Standard Singleton implementation
-	*/
-	private static $instance;
-
-	public static function get_object() {
-		if ( ! static::$instance ) {
-			static::$instance = new CF_Settings();
-		}
-		return static::$instance;
-	}
-
-	// Enforce use of singleton
-	protected function __construct() {
-		add_action( 'admin_init', array( $this, 'setup_registered_settings' ) );
-	}
-	private function __clone() { }
-	private function __wakeup() { }
 
 
 	/**
 	*  General class definition
 	*/
-	private $registered_settings;
-	private $registrant;
-	private $templates;
+	private static $registered_settings;
+	private static $registrant;
+	private static $templates;
+	private static $assets_url;
+	private static $placeholders;
+	private static $allowed_tags = array(
+		'code' => array(),
+		'em' => array(),
+		'strong' => array(),
+		'br' => array(),
+	);
 
-	public function setup_registered_settings() {
-		if ( isset( $this->registered_settings ) ) {
-			$plugin_names = get_object_vars( $this->registered_settings );
-			foreach ( $plugin_names as $plugin_name ) {
-				$callbacks = $this->registered_settings->$plugin_name['callbacks'];
-				$callbacks['sections']();
-				add_action( 'admin_menu', $callbacks['menu'] );
-			}
-		}
-	}
-
-	public function add_plugin_settings() {
+	public static function add_plugin_settings() {
 		global $wp_filter;
 
 		$settings = array();
@@ -61,7 +50,7 @@ class CF_Settings {
 						$settings[ $plugin_name ] = apply_filters( $hook, array() );
 					}
 					else {
-						$this->register_error(
+						CF_Settings::register_error(
 							'Duplicate Plugin Name',
 							$plugin_name,
 							array(
@@ -71,7 +60,7 @@ class CF_Settings {
 					}
 				}
 				else {
-					$this->register_error(
+					CF_Settings::register_error(
 						'Invalid Hook Declaration',
 						'N/A',
 						array(
@@ -82,97 +71,112 @@ class CF_Settings {
 				}
 			}
 		}
-		$this->register_settings( $settings );
+		CF_Settings::register_settings( $settings );
+
+		if ( is_array( CF_Settings::$registered_settings ) && CF_Settings::$registered_settings ) {
+			$plugin_names = array_keys( CF_Settings::$registered_settings );
+			foreach ( $plugin_names as $plugin_name ) {
+				$callbacks = CF_Settings::$registered_settings[ $plugin_name ]['callbacks'];
+				add_action( 'admin_init', $callbacks['admin_init'] );
+				add_action( 'admin_menu', $callbacks['admin_menu'] );
+			}
+		}
 	}
 
-	private function register_settings( $raw_settings ) {
-		if ( ! isset( $this->registered_settings )
-			|| gettype( $this->registered_settings ) !== 'stdObject'
+	private static function register_settings( $raw_settings ) {
+		if ( ! isset( CF_Settings::$registered_settings )
+			|| ! is_array( CF_Settings::$registered_settings )
 		) {
-			$this->registered_settings = (object) array();
+			CF_Settings::$registered_settings = array();
 		}
 
-		$raw_settings = $this->sanitize_settings_array( $raw_settings );
+		$settings = CF_Settings::sanitize_settings_array( $raw_settings );
 
-		foreach ( $raw_settings as $plugin_name => $plugin_data ) {
-			if ( ! isset( $registered_settings->$plugin_name ) ) {
-				if ( $this->set_registrant_plugin_data( $plugin_data, $plugin_name ) ) {
-					$this->setup_registrant_entry();
+		foreach ( $settings as $plugin_name => $plugin_data ) {
+			if ( ! isset( $registered_settings[ $plugin_name ] ) ) {
+				if ( CF_Settings::set_registrant_plugin_data( $plugin_data, $plugin_name ) ) {
+					CF_Settings::setup_registrant_entry();
 
-					$this->register_settings_page_callback();
+					CF_Settings::register_settings_page_callback();
 					// !! menu callback depends on page callback !!
-					$this->register_settings_menu_callback();
+					CF_Settings::register_admin_menu_callback();
 
-					$this->register_settings_sections_callback();
-					$this->register_settings_fields_callback();
+					CF_Settings::register_settings_sections_callback();
+					CF_Settings::register_settings_fields_callback();
+					CF_Settings::register_admin_init_callback();
 				}
 			}
 			else {
-				$this->register_error( 'Unexpected Duplicate Plugin Name', $plugin_name, $plugin_data );
+				CF_Settings::register_error( 'Unexpected Duplicate Plugin Name', $plugin_name, $plugin_data );
 			}
 		}
 	}
 
 	/**
 	*  Specifically to ensure values that are or will become array IDs are of a reasonable
-	*  format so that any process which might use them as object members will not stop
-	*  execution
+	*  format.
 	*/
-	private function sanitize_settings_array( $settings_in ) {
+	private static function sanitize_settings_array( $settings_in ) {
 		foreach ( $settings_in as $key => $val ) {
 			if ( is_array( $val ) ) {
-				$val = $this->sanitize_settings_array( $val );
+				$val = CF_Settings::sanitize_settings_array( $val );
 			}
-			unset( $settings_in[ $key ] );
-			$settings_in[ str_replace( '-', '_', sanitize_title( $key ) ) ] = $val;
-
-			if ( $key == 'id' && is_string( $val ) ) {
-				$settings_in[ $key ] = str_replace( '-', '_', sanitize_title( $val ) );
-			}
-			else {
-				// Most will be auto-generated. Those that wont will throw an error.
+			$sanitized_key = sanitize_title( $key );
+			if ( $sanitized_key != $key ) {
+				$settings_in[ $sanitized_key ] = $val;
 				unset( $settings_in[ $key ] );
+			}
+			if ( $key == 'id' ) {
+				if ( is_string( $val ) ) {
+					$settings_in[ $key ] = sanitize_title( $val );
+				}
+				else {
+					unset( $settings_in[ $key ] );
+				}
 			}
 		}
 		return $settings_in;
 	}
 
-	private function set_registrant_plugin_data( $plugin_data, $plugin_name ) {
+	private static function set_registrant_plugin_data( $plugin_data, $plugin_name ) {
 		$registrant = array(
 			'name' => $plugin_name,
-			'id' => $this->extract_settings_id( $plugin_data, $plugin_name ),
-			'group' => $this->extract_settings_group( $plugin_data, $plugin_name ),
-			'option' => $this->extract_settings_option_name( $plugin_data, $plugin_name ),
-			'menu' => $this->build_menu_data_array( $plugin_data, $plugin_name ),
-			'page' => $this->build_page_data_array( $plugin_data, $plugin_name ),
-			'sections' => $this->build_sections_array( $plugin_data, $plugin_name ),
-			'fields_by_section' => $this->build_fields_array( $plugin_data, $plugin_name ),
+			'id' => CF_Settings::extract_settings_id( $plugin_data, $plugin_name ),
+			'group' => CF_Settings::extract_settings_group( $plugin_data, $plugin_name ),
+			'option' => CF_Settings::extract_settings_option_name( $plugin_data, $plugin_name ),
+			'menu' => CF_Settings::build_menu_data_array( $plugin_data, $plugin_name ),
+			'page' => CF_Settings::build_page_data_array( $plugin_data, $plugin_name ),
+			'sections' => CF_Settings::build_sections_array( $plugin_data, $plugin_name ),
+			'fields_by_section' => array(),
 			'current_settings' => array()
 		);
 
+		CF_Settings::$registrant = $registrant;
 		if ( $registrant['option'] ) {
-			$registrant['current_settings'] = get_option( $registrant['option'], array() );
+			CF_Settings::$registrant['fields_by_section'] = CF_Settings::build_fields_array( $plugin_data, $plugin_name );
+			CF_Settings::$registrant['current_settings'] = get_option( $registrant['option'], array() );
 		}
 
-		foreach ( $registrant as $key => $val ) {
+		foreach ( CF_Settings::$registrant as $key => $val ) {
 			if ( ! $val && $key != 'current_settings' ) {
-				$this->register_error(
+				CF_Settings::register_error(
 					'Registrant Setup Failure',
 					$plugin_name,
 					array(
 						'failed step' => $key,
+						'val' => $val,
+						'registrant' => CF_Settings::$registrant,
 						'settings data' => $plugin_data
 					)
 				);
+				CF_Settings::$registrant = array();
 				return false;
 			}
 		}
-
-		$this->registrant = (object) $registrant;
 		return true;
 	}
 
-	private function extract_settings_id( $plugin_data, $plugin_name ) {
+	private static function extract_settings_id( $plugin_data, $plugin_name ) {
 		if ( isset( $plugin_data['id'] ) && $plugin_data['id'] ) {
 			$id = $plugin_data['id'];
 		}
@@ -185,7 +189,7 @@ class CF_Settings {
 		return sanitize_title( $id );
 	}
 
-	private function extract_settings_group ( $plugin_data, $plugin_name ) {
+	private static function extract_settings_group ( $plugin_data, $plugin_name ) {
 		if ( isset( $plugin_data['group'] ) && $plugin_data['group'] ) {
 			$group = $plugin_data['group'];
 		}
@@ -198,7 +202,7 @@ class CF_Settings {
 		return sanitize_title( $group );
 	}
 
-	private function extract_settings_option_name ( $plugin_data, $plugin_name ) {
+	private static function extract_settings_option_name ( $plugin_data, $plugin_name ) {
 		if ( isset( $plugin_data['option_name'] ) && $plugin_data['option_name'] ) {
 			$option = $plugin_data['option_name'];
 		}
@@ -211,7 +215,7 @@ class CF_Settings {
 		return sanitize_title( $option );
 	}
 
-	private function build_menu_data_array ( $plugin_data, $plugin_name ) {
+	private static function build_menu_data_array ( $plugin_data, $plugin_name ) {
 		if ( isset( $plugin_data['menu'] )
 			&& is_array( $plugin_data['menu'] )
 			&& $plugin_data['menu']
@@ -223,10 +227,10 @@ class CF_Settings {
 		}
 
 		$menu = array_merge( apply_filters( 'cf_settings__default_menu_options', array(
-				'label' => $this->build_registrant_name( $plugin_name ),
+				'label' => CF_Settings::build_registrant_name( $plugin_name ),
 				'parent' => 'options',
 				'cap' => 'manage_options',
-				'slug' => santize_title( $plugin_name ),
+				'slug' => sanitize_title( $plugin_name ),
 			) ),
 			$provided
 		);
@@ -234,7 +238,7 @@ class CF_Settings {
 		return $menu;
 	}
 
-	private function build_page_data_array ( $plugin_data ) {
+	private static function build_page_data_array ( $plugin_data, $plugin_name ) {
 		if ( isset( $plugin_data['page'] )
 			&& is_array( $plugin_data['page'] )
 			&& $plugin_data['page']
@@ -246,8 +250,10 @@ class CF_Settings {
 		}
 
 		$page = array_merge( apply_filters( 'cf_settings__default_page_options', array(
-				'heading' => $this->build_registrant_name( $plugin_name ),
-				'template' => $this->get_template( 'page/settings-simple' ),
+				'heading' => CF_Settings::build_registrant_name( $plugin_name ),
+				'template' => CF_Settings::get_template( 'page/settings-simple' ),
+				'settings_group' => $plugin_data['group'],
+				'settings_id' => $plugin_data['id'],
 			) ),
 			$provided
 		);
@@ -255,21 +261,21 @@ class CF_Settings {
 		return $page;
 	}
 
-	private function build_sections_array ( $plugin_data, $plugin_name ) {
+	private static function build_sections_array ( $plugin_data, $plugin_name ) {
 		$sections = array();
 		foreach ( $plugin_data['settings'] as $section ) {
 			if ( ! is_array( $section ) || ! isset( $section['id'] ) && ! isset( $section['name'] ) ) {
-				$this->register_error( 'Invalid Object in Settings array', $plugin_name, $section );
+				CF_Settings::register_error( 'Invalid Object in Settings array', $plugin_name, $section );
 			}
 			else {
 				if ( isset( $section['template'] ) && $section['template'] ) {
 					$template = $section['template'];
 				}
 				else {
-					$template = $this->get_template( 'section/default' );
+					$template = CF_Settings::get_template( 'section/default' );
 				}
 				$sections[ $section['id'] ] = array(
-					'name' => $section['name'],
+					'label' => $section['label'],
 					'template' => $template
 				);
 			}
@@ -277,7 +283,7 @@ class CF_Settings {
 		return $sections;
 	}
 
-	private function build_fields_array ( $plugin_data, $plugin_name ) {
+	private static function build_fields_array ( $plugin_data, $plugin_name ) {
 		$fields = array();
 		foreach ( $plugin_data['settings'] as $section => $section_data ) {
 			if ( ! isset( $section_data['id'] ) ) {
@@ -288,21 +294,20 @@ class CF_Settings {
 				$fields[ $section_id ] = array();
 			}
 			else {
-				$this->register_error( 'Duplicate section ID', $plugin_name, $section_id );
+				CF_Settings::register_error( 'Duplicate section ID', $plugin_name, $section_id );
 				continue;
 			}
-
 			foreach ( $section_data['fields'] as $field_id => $field_data ) {
-				if ( $field['type'] == 'group' || $field['multi'] ) {
-					$field_array = $this->build_multi_field_array( $field_id, $field_data );
+				if ( $field_data['type'] == 'group' || isset( $field_data['multi'] ) ) {
+					$field_array = CF_Settings::build_multi_field_array( $field_id, $field_data );
 					if ( $field_array ) {
 						$fields[ $section_id ][ $field_id ] = $field_array;
 					}
 				}
 				else {
-					$valid = $this->validate_field_settings( $field_data );
+					$valid = CF_Settings::validate_field_settings( $field_data, $section_id );
 					if ( $valid ) {
-						$fields[ $section_id ][ $field_id ] = $this->finalize_field( $section_id, $field_id, $field_data );
+						$fields[ $section_id ][ $field_id ] = CF_Settings::finalize_field( $section_id, $field_id, $field_data );
 					}
 				}
 			}
@@ -311,12 +316,12 @@ class CF_Settings {
 		return $fields;
 	}
 
-	private function build_multi_field_array( $section_id, $field_id, $fields ) {
+	private static function build_multi_field_array( $section_id, $field_id, $fields ) {
 		$multi_field_array = array();
 		if ( ! is_array( $fields ) || count( $fields ) < 1 ) {
-			$this->register_error(
+			CF_Settings::register_error(
 				'Invalid Field Group',
-				$this->registrant->name,
+				CF_Settings::$registrant['name'],
 				array(
 					'id' => $field_id,
 					'field_group' => $fields
@@ -325,9 +330,9 @@ class CF_Settings {
 		}
 		else {
 			foreach ( $fields as $sub_field_id => $field_data ) {
-				$valid = $this->validate_field_settings( $field_data );
+				$valid = CF_Settings::validate_field_settings( $field_data, $section_id );
 				if ( $valid ) {
-					$multi_field_array[ $sub_field_id ] = $this->finalize_field( $section_id, $field_id, $field_data, $sub_field_id );
+					$multi_field_array[ $sub_field_id ] = CF_Settings::finalize_field( $section_id, $field_id, $field_data, $sub_field_id );
 				}
 			}
 		}
@@ -335,14 +340,14 @@ class CF_Settings {
 		return $multi_field_array;
 	}
 
-	private function validate_field_settings( $field_data ) {
-		$valid = false;
+	private static function validate_field_settings( $field_data, $section_id ) {
+		$valid = true;
 		if ( ! $valid ) {
-			$this->register_error(
+			CF_Settings::register_error(
 				'Invalid Field Entry',
-				$plugin_name,
+				CF_Settings::$registrant['name'],
 				array(
-					'section' => $section_data['id'],
+					'section' => $section_id,
 					'field' => $field_data
 				)
 			);
@@ -353,14 +358,16 @@ class CF_Settings {
 		}
 	}
 
-	private function finalize_field( $section_id, $field_id, $field_data, $sub_field_id = null ) {
-		$field_data['renderer'] = $this->field_type_template_callback( $field_data );
-		$field_data['value'] = $this->parse_existing_field_value( $section_id, $field_id, $field_data, $sub_field_id );
-		$field_data['name'] = $this->build_field_name( $section_id, $field_id, $field_data, $sub_field_id );
+	private static function finalize_field( $section_id, $field_id, $field_data, $sub_field_id = null ) {
+		$field_data['renderer'] = CF_Settings::get_field_template_renderer( $field_data );
+		$field_data['value'] = CF_Settings::parse_existing_field_value( $section_id, $field_id, $field_data, $sub_field_id );
+		$field_data['name'] = CF_Settings::build_field_name( $section_id, $field_id, $field_data, $sub_field_id );
+		$field_data['in_group'] = ! is_null( $sub_field_id );
+		return $field_data;
 	}
 
-	private function parse_existing_field_value( $section_id, $field_id, $field_data, $sub_field_id = null ) {
-		$current_settings = &$this->registrant->current_settings;
+	private static function parse_existing_field_value( $section_id, $field_id, $field_data, $sub_field_id = null ) {
+		$current_settings = &CF_Settings::$registrant['current_settings'];
 		$have_current = isset( $current_settings[ $section_id ] )
 			&& isset( $current_settings[ $section_id ][ $field_id ] );
 
@@ -370,7 +377,7 @@ class CF_Settings {
 		}
 
 		if ( ! $have_current ) {
-			$current_settings = $this->build_section_subarrays( $current_settings, $section_id, $field_id, $sub_field_id );
+			$current_settings = CF_Settings::build_section_subarrays( $current_settings, $section_id, $field_id, $sub_field_id );
 
 			if ( is_null( $sub_field_id ) ) {
 				$current_settings[ $section_id ][ $field_id ] = isset( $field_data['default'] )
@@ -392,7 +399,7 @@ class CF_Settings {
 		return $current;
 	}
 
-	private function build_section_subarrays( $current_settings, $section_id, $field_id, $sub_field_id = null ) {
+	private static function build_section_subarrays( $current_settings, $section_id, $field_id, $sub_field_id = null ) {
 		if ( ! isset( $current_settings[ $section_id ] ) ) {
 			$current_settings[ $section_id ] = array();
 		}
@@ -404,7 +411,7 @@ class CF_Settings {
 		return $current_settings;
 	}
 
-	private function build_field_name( $section_id, $field_id, $field_data, $sub_field_id = null ) {
+	private static function build_field_name( $section_id, $field_id, $field_data, $sub_field_id = null ) {
 		if ( ! is_null( $sub_field_id ) ) {
 			$sub_index = '[' . $sub_field_id . ']';
 		}
@@ -412,49 +419,70 @@ class CF_Settings {
 			$sub_index = '';
 		}
 
-		$name = $this->registrant->option
+		$name = CF_Settings::$registrant['option']
 			. '[' . $section_id . ']'
-			. '[' . $field_data . ']'
+			. '[' . $field_id . ']'
 			. $sub_index;
 
 		return $name;
 	}
 
-	private function setup_registrant_entry() {
+	private static function setup_registrant_entry() {
 		// Verified before this function call that name is not a duplicate
-		$this->registered_settings->{$this->registrant->name} = array(
+		CF_Settings::$registered_settings[ CF_Settings::$registrant['name'] ] = array(
 			'callbacks' => array(),
 		);
 	}
 
-	private function register_settings_page_callback() {
-		$args = $this->registrant->page;
+	private static function register_settings_page_callback() {
+		$args = CF_Settings::$registrant['page'];
 
-		$this->registered_settings->{$this->registrant->name}['page_callback'] =
-			function() use( $args ) {
-				$cf_settings = CF_Settings::get_object();
+		CF_Settings::$registered_settings[ CF_Settings::$registrant['name'] ]['page_callback'] =
+			function() use ( $args ) {
 				wp_enqueue_style(
 					'cf_settings_css',
-					$cf_settings->get_settings_stylesheet()
+					CF_Settings::get_settings_stylesheet()
 				);
-				$args = $cf_settings->fill_all_placeholders( $args );
+				$args = CF_Settings::fill_all_placeholders( apply_filters(
+					'cf_setting__page_template_args', $args, $args['template']
+				) );
+				wp_enqueue_script(
+					'cf_settings_actions',
+					CF_Settings::get_actions_script(),
+					array( 'jquery' )
+				);
 				include( $args['template'] );
 			};
 	}
 
-	private function register_settings_menu_callback() {
-		$label = __( $this->registrant->menu['label'], 'cf_settings' );
-		$parent = $this->registrant->menu['parent'];
-		$cap = $this->registrant->menu['required_cap'];
-		$slug = sanitize_title( $this->registrant->menu['slug'] );
-		$renderer = $this->registered_settings->{$this->registrant->name}['page_callback'];
+	private static function register_admin_menu_callback() {
+		$label = __( CF_Settings::$registrant['menu']['label'], 'cf_settings' );
+		$parent = CF_Settings::$registrant['menu']['parent'];
+		$cap = CF_Settings::$registrant['menu']['cap'];
+		$slug = sanitize_title( CF_Settings::$registrant['menu']['slug'] );
+		$renderer = CF_Settings::$registered_settings[ CF_Settings::$registrant['name'] ]['page_callback'];
 
 		if ( ! $parent ) {
 			$parent = 'menu';
 		}
+		// add_submenu_page wrappers that exist as of WordPress 4.3.1
+		$submenu_helpers = array(
+			'dashboard',
+			'posts',
+			'media',
+			'links',
+			'pages',
+			'comments',
+			'theme',
+			'plugins',
+			'users',
+			'management',
+			'options',
+		);
 
-		if ( function_exists( 'add_' . $parent . '_page' ) ) {
-			$this->registered_settings->{$this->registrant->name}['callbacks']['menu'] =
+		// If we have a submenu page wrapper or just want to add a top level menu, call the appropriate wrapper
+		if ( in_array( $parent, $submenu_helpers ) || $parent == 'menu' ) {
+			CF_Settings::$registered_settings[ CF_Settings::$registrant['name'] ]['callbacks']['admin_menu'] =
 				function() use ( $parent, $label, $cap, $slug, $renderer ) {
 					call_user_func( 'add_' . $parent . '_page',
 						$label,
@@ -465,21 +493,30 @@ class CF_Settings {
 					);
 				};
 		}
+		/**
+		*  Otherwise try to put it under a post type menu. Any custom top level menu is safe, but we
+		*  can't know what the'll be so we'll just issue a warning that says we don't know if the
+		*  parent provided is valid.
+		*/
 		else {
 			if ( strpos( $parent, 'post_type__' ) === 0 ) {
 				$parent = 'edit.php?post_type=' . substr( $parent, strlen( 'post_type__' ) );
 			}
 			else {
-				$this->register_warning(
+				CF_Settings::register_warning(
 					'Possible unknown menu item parent',
-					$this->registrant->name,
+					CF_Settings::$registrant['name'],
 					array(
+						'function_exists' => function_exists( 'add_' . $parent . '_page' )
+							? 'yes'
+							: 'no',
+						'function_checked' => 'add_' . $parent . '_page',
 						'given_parent' => $parent,
 					)
 				);
 			}
 
-			$this->registered_settings->{$this->registrant->name}['callbacks']['menu'] =
+			CF_Settings::$registered_settings[ CF_Settings::$registrant['name'] ]['callbacks']['admin_menu'] =
 				function() use ( $parent, $label, $cap, $slug, $renderer ) {
 					add_submenu_page( $parent,
 						$label,
@@ -492,40 +529,43 @@ class CF_Settings {
 		}
 	}
 
-	private function register_settings_sections_callback() {
-		$plugin_name = $this->registrant->name;
-		$settings_group = $this->registrant->group;
-		$settings_option = $this->registrant->option;
-		$sections = $this->registrant->sections;
-		$settings_id = $this->registrant->id;
-		$slug = $this->registrant->menu['slug'];
+	private static function register_settings_sections_callback() {
+		$plugin_name = CF_Settings::$registrant['name'];
+		$settings_group = CF_Settings::$registrant['group'];
+		$settings_option = CF_Settings::$registrant['option'];
+		$sections = CF_Settings::$registrant['sections'];
+		$settings_id = CF_Settings::$registrant['id'];
 
-		$this->registered_settings->{$this->registrant->name}['callbacks']['sections'] =
-			function() use ( $plugin_name, $settings_group, $settings_option, $sections, $settings_id, $slug ) {
+		CF_Settings::$registered_settings[ CF_Settings::$registrant['name'] ]['callbacks']['sections'] =
+			function() use ( $plugin_name, $settings_group, $settings_option, $sections, $settings_id ) {
 
 				register_setting( $settings_group, $settings_option );
 				foreach ( $sections as $section_id => $section_data ) {
-					$renderer = function() use ( $section_data ) {
-						$cf_settings = CF_Settings::get_object();
-						$args = $cf_settings->fill_all_placeholders( $section_data );
-						include( $args['template'] );
-					};
+					$renderer =
+						function() use ( $section_id, $section_data ) {
+							$args = CF_Settings::fill_all_placeholders( apply_filters(
+								'cf_settings__section_template_args',
+								array_merge( array( 'id' => $section_id ), $section_data ),
+								$section_data['template']
+							) );
+							include( $args['template'] );
+						};
 					add_settings_section(
 						$section_id,
-						$section_data['name'],
+						$section_data['label'],
 						$renderer,
-						$slug
+						$settings_id
 					);
 				}
 			};
 	}
 
-	private function register_settings_fields_callback() {
-		$fields_by_section = $this->registrant->fields_by_section;
-		$settings_id = $this->registrant->id;
+	private static function register_settings_fields_callback() {
+		$fields_by_section = CF_Settings::$registrant['fields_by_section'];
+		$settings_id = CF_Settings::$registrant['id'];
 
-		$this->registered_settings->{$this->registrant->name}['callbacks']['fields'] =
-			function() use ( $fields_by_section, $sections, $settings_id ) {
+		CF_Settings::$registered_settings[ CF_Settings::$registrant['name'] ]['callbacks']['fields'] =
+			function() use ( $fields_by_section, $settings_id ) {
 				foreach ( $fields_by_section as $section_id => $fields ) {
 					foreach ( $fields as $field_id => $field_data ) {
 						add_settings_field(
@@ -541,19 +581,28 @@ class CF_Settings {
 			};
 	}
 
-	private function get_field_template_renderer( $field_data ) {
-		$template = $this->get_template( 'field/' . $field_data['type'] );
+	private static function register_admin_init_callback() {
+		$callbacks = CF_Settings::$registered_settings[ CF_Settings::$registrant['name'] ]['callbacks'];
+		CF_Settings::$registered_settings[ CF_Settings::$registrant['name'] ]['callbacks']['admin_init'] =
+			function() use ( $callbacks ) {
+				$callbacks['sections']();
+				$callbacks['fields']();
+			};
+	}
 
-		return function( $args ) use ( $template ) {
-			$args = self::fill_all_placeholders( $args );
-			$allowed_tags = self::$allowed_tags;
+	private static function get_field_template_renderer( $field_data ) {
+		$template = CF_Settings::get_template( 'field/' . $field_data['type'] );
+		$allowed_tags = CF_Settings::$allowed_tags;
+
+		return function( $args ) use ( $template, $allowed_tags ) {
+			$args = CF_Settings::fill_all_placeholders( $args );
 			include( $template );
 		};
 	}
 
-	private function init_templates() {
+	private static function init_templates() {
 		$templates = array();
-		$template_dir = $this->get_template_dir();
+		$template_dir = CF_Settings::get_template_dir();
 		foreach ( glob( $template_dir . '*', GLOB_ONLYDIR ) as $dir ) {
 			$template_group = basename( $dir );
 			if ( ! isset( $templates[ $template_group ] ) ) {
@@ -563,40 +612,153 @@ class CF_Settings {
 				$template_name = substr( basename( $template ), 0, -4 );
 				$templates[ $template_group ][ $template_name ] = apply_filters(
 						'cf_settings__template__' . $template_group . '__' . $template_name,
-						$file
+						$template
 					);
 			}
  		}
- 		$this->templates = apply_filters( 'cf_settings__templates__all', $templates );
+ 		CF_Settings::$templates = apply_filters( 'cf_settings__templates__all', $templates );
 	}
 
-	private function get_template_dir() {
+	private static function get_template_dir() {
 		return trailingslashit( dirname( __FILE__ ) ) . 'assets/templates/';
 	}
 
-	private function get_template( $reference ) {
+	private static function get_template( $reference ) {
 		list( $group, $part ) = explode( '/', $reference );
-		$templates = $this->get_all_templates();
-		return $template[ $group ][ $part ];
-	}
-
-	private function get_all_templates() {
-		if ( ! isset( $this->templates ) ) {
-			$this->init_templates();
+		$templates = CF_Settings::get_all_templates();
+		if ( isset( $templates[ $group ] ) && isset( $templates[ $group ][ $part ] ) ) {
+			return $templates[ $group ][ $part ];
 		}
-		return $this->templates;
+		else {
+			if ( isset( $templates[ $group ] ) ) {
+				return $templates[ $group ]['default'];
+			}
+			else {
+				return $template['default'];
+			}
+		}
+		return $templates[ $group ][ $part ];
 	}
 
-	private function build_registrant_name() {
-		return ucwords( preg_replace( '/-_/', ' ', $this->registrant->name ) ) . ' Settings';
+	private static function get_all_templates() {
+		if ( ! isset( CF_Settings::$templates ) ) {
+			CF_Settings::init_templates();
+		}
+		return CF_Settings::$templates;
 	}
 
-	private function register_error( $msg, $plugin_name, $data ) {
-
+	private static function build_registrant_name() {
+		return ucwords( preg_replace( '/-_/', ' ', CF_Settings::$registrant['name'] ) ) . ' Settings';
 	}
 
-	private function register_warning( $msg, $plugin_name, $data ) {
-
+	public static function fill_placeholders( $value ) {
+		if ( ! isset( CF_Settings::$placeholders ) || ! is_array( CF_Settings::$placeholders ) ) {
+			CF_Settings::$placeholders = apply_filters( 'cf_settings__value_placeholders', array(
+					'home_url' => home_url(),
+					'site_url' => site_url(),
+				)
+			);
+		}
+		if ( is_string( $value ) ) {
+			foreach ( CF_Settings::$placeholders as $placeholder => $filler ) {
+				if ( strpos( $value, '::' . $placeholder . '::' ) !== false ) {
+					$value = str_replace( '::' . $placeholder . '::', $filler, $value );
+				}
+			}
+		}
+		return $value;
 	}
 
+	public static function fill_all_placeholders( $array ) {
+		foreach ( $array as $k => $v ) {
+			if ( is_array( $v ) ) {
+				$array[ $k ] = CF_Settings::fill_all_placeholders( $v );
+			}
+			else {
+				$array[ $k ] = CF_Settings::fill_placeholders( $v );
+			}
+		}
+		return $array;
+	}
+
+	private static function register_error( $msg, $plugin_name, $data ) {
+		file_put_contents( '/messages/test', print_r( array( 'error' => func_get_args() ), 1 ), FILE_APPEND );
+	}
+
+	private static function register_warning( $msg, $plugin_name, $data ) {
+		file_put_contents( '/messages/test', print_r( array( 'warning' => func_get_args() ), 1 ), FILE_APPEND );
+	}
+
+	public static function get_settings_stylesheet() {
+		$assets = CF_Settings::get_assets_url();
+		return apply_filters( 'cf_settings__default_settings_css', $assets . 'css/style.css' );
+	}
+
+	private static function get_assets_url() {
+		if ( ! isset( CF_Settings::$assets_url ) ) {
+			CF_Settings::$assets_url = plugin_dir_url( __FILE__ ) . 'assets/';
+		}
+		return CF_Settings::$assets_url;
+	}
+
+	private static function get_actions_script() {
+		$assets = CF_Settings::get_assets_url();
+		return apply_filters( 'cf_settings__default_actions_script', $assets . 'js/actions.js' );
+	}
+
+}
+add_action( 'plugins_loaded', 'CF_Settings::add_plugin_settings' );
+
+if ( ! defined( 'DOING_AJAX' ) || ! DOING_AJAX ) {
+add_filter( 'cf_settings__plugin_settings__eg_name', function( $a ) {
+	return array(
+		'id' => 'my-plugin-settings-id',
+		'group' => 'my-plugin-group',
+		'option_name' => 'my-plugin-db-name',
+		'menu' => array(
+			'label' => 'My Plugin Settings',
+			'parent' => '',
+		),
+		'page' => array(
+			'heading' => 'My Plugin Settings',
+		),
+		'settings' => array(
+			array(
+				'id' => 'my-first-section',
+				'label' => 'My First Section',
+				'fields' => array(
+					'my-setting-1a' => array(
+						'label' => 'Setting 1a',
+						'description' => '1a -- text',
+						'type' => 'text',
+						'default' => 'Setting 1a Default Value',
+					),
+					'my-setting-1b' => array(
+						'label' => 'Setting 1b',
+						'description' => '1b -- rel_link',
+						'type' => 'rel_link',
+						'default' => '/',
+					),
+					'my-setting-1c' => array(
+						'label' => 'Setting 1c',
+						'description' => '1c -- select',
+						'type' => 'select',
+						'options' => array(
+							'1c-a' => '1c A',
+							'1c-b' => '1c B',
+							'1c-c' => '1c C',
+							'1c-d' => '1c D',
+						),
+					),
+					'my-setting-1d' => array(
+						'label' => 'Setting 1d',
+						'description' => '1d -- true_false',
+						'type' => 'true_false',
+						'default' => 0,
+					),
+				),
+			),
+		),
+	);
+});
 }
