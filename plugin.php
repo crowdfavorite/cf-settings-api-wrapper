@@ -24,17 +24,30 @@ class CF_Settings {
 	}
 
 	// Enforce use of singleton
-	protected function __construct() { }
+	protected function __construct() {
+		add_action( 'admin_init', array( $this, 'setup_registered_settings' ) );
+	}
 	private function __clone() { }
 	private function __wakeup() { }
-
 
 
 	/**
 	*  General class definition
 	*/
-	private $plugins_settings;
+	private $registered_settings;
 	private $registrant;
+	private $templates;
+
+	public function setup_registered_settings() {
+		if ( isset( $this->registered_settings ) ) {
+			$plugin_names = get_object_vars( $this->registered_settings );
+			foreach ( $plugin_names as $plugin_name ) {
+				$callbacks = $this->registered_settings->$plugin_name['callbacks'];
+				$callbacks['sections']();
+				add_action( 'admin_menu', $callbacks['menu'] );
+			}
+		}
+	}
 
 	public function add_plugin_settings() {
 		$settings = apply_filters( 'cf_settings__plugin_settings', array() );
@@ -42,21 +55,21 @@ class CF_Settings {
 			$this->register_settings( $settings );
 		}
 		else {
-			$this->plugins_settings = array();
+			$this->registered_settings = (object) array();
 		}
 	}
 
 	private function register_settings( $raw_settings ) {
-		if ( ! isset( $this->plugins_settings )
-			|| gettype( $this->plugins_settings ) !== 'stdObject'
+		if ( ! isset( $this->registered_settings )
+			|| gettype( $this->registered_settings ) !== 'stdObject'
 		) {
-			$this->plugins_settings = (object) array();
+			$this->registered_settings = (object) array();
 		}
 
-		$raw_settings = $this->sanitize_input( $raw_settings );
+		$raw_settings = $this->sanitize_settings_array( $raw_settings );
 
 		foreach ( $raw_settings as $plugin_name => $plugin_data ) {
-			if ( ! isset( $registered_settings[ $plugin_name ] ) ) {
+			if ( ! isset( $registered_settings->$plugin_name ) ) {
 				if ( $this->set_registrant_plugin_data( $plugin_data, $plugin_name ) ) {
 					$this->setup_registrant_entry();
 
@@ -82,10 +95,10 @@ class CF_Settings {
 	*  format so that any process which might use them as object members will not stop
 	*  execution
 	*/
-	private function sanitize_input( $settings_in ) {
+	private function sanitize_settings_array( $settings_in ) {
 		foreach ( $settings_in as $key => $val ) {
 			if ( is_array( $val ) ) {
-				$val = $this->sanitize_input( $val );
+				$val = $this->sanitize_settings_array( $val );
 			}
 			unset( $settings_in[ $key ] );
 			$settings_in[ str_replace( '-', '_', sanitize_title( $key ) ) ] = $val;
@@ -111,10 +124,15 @@ class CF_Settings {
 			'page' => $this->build_page_data_array( $plugin_data, $plugin_name ),
 			'sections' => $this->build_sections_array( $plugin_data, $plugin_name ),
 			'fields_by_section' => $this->build_fields_array( $plugin_data, $plugin_name ),
+			'current_settings' => array()
 		);
 
+		if ( $registrant['option'] ) {
+			$registrant['current_settings'] = get_option( $registrant['option'], array() );
+		}
+
 		foreach ( $registrant as $key => $val ) {
-			if ( ! $val ) {
+			if ( ! $val && $key != 'current_settings' ) {
 				return false;
 			}
 		}
@@ -198,7 +216,7 @@ class CF_Settings {
 
 		$page = array_merge( apply_filters( 'cf_settings__default_page_options', array(
 				'heading' => $this->build_registrant_name( $plugin_name ),
-				'template' => $this->get_template( 'page/settings_simple' ),
+				'template' => $this->get_template( 'page/settings-simple' ),
 			) ),
 			$provided
 		);
@@ -243,21 +261,18 @@ class CF_Settings {
 				continue;
 			}
 
-			foreach ( $section_data['fields'] as $field_id => $field ) {
-				$field_id = $field_id;
-				if ( $this->validate_field_settings( $field ) && $field_id ) {
-					$field['renderer'] = $this->field_type_template_callback( $field );
-					$fields[ $section_id ][ $field_id ] = $field;
+			foreach ( $section_data['fields'] as $field_id => $field_data ) {
+				if ( $field['type'] == 'group' || $field['multi'] ) {
+					$field_array = $this->build_multi_field_array( $field_id, $field_data );
+					if ( $field_array ) {
+						$fields[ $section_id ][ $field_id ] = $field_array;
+					}
 				}
 				else {
-					$this->register_error(
-						'Invalid Field Entry',
-						$plugin_name,
-						array(
-							'section' => $section_data['id'],
-							'field' => $field
-						)
-					);
+					$valid = $this->validate_field_settings( $field_data );
+					if ( $valid ) {
+						$fields[ $section_id ][ $field_id ] = $this->finalize_field( $section_id, $field_id, $field_data );
+					}
 				}
 			}
 		}
@@ -265,10 +280,118 @@ class CF_Settings {
 		return $fields;
 	}
 
+	private function build_multi_field_array( $section_id, $field_id, $fields ) {
+		$multi_field_array = array();
+		if ( ! is_array( $fields ) || count( $fields ) < 1 ) {
+			$this->register_error(
+				'Invalid Field Group',
+				$this->registrant->name,
+				array(
+					'id' => $field_id,
+					'field_group' => $fields
+				)
+			);
+		}
+		else {
+			foreach ( $fields as $sub_field_id => $field_data ) {
+				$valid = $this->validate_field_settings( $field_data );
+				if ( $valid ) {
+					$multi_field_array[ $sub_field_id ] = $this->finalize_field( $section_id, $field_id, $field_data, $sub_field_id );
+				}
+			}
+		}
+
+		return $multi_field_array;
+	}
+
+	private function validate_field_settings( $field_data ) {
+		$valid = false;
+		if ( ! $valid ) {
+			$this->register_error(
+				'Invalid Field Entry',
+				$plugin_name,
+				array(
+					'section' => $section_data['id'],
+					'field' => $field_data
+				)
+			);
+			return false;
+		}
+		else {
+			return true;
+		}
+	}
+
+	private function finalize_field( $section_id, $field_id, $field_data, $sub_field_id = null ) {
+		$field_data['renderer'] = $this->field_type_template_callback( $field_data );
+		$field_data['value'] = $this->parse_existing_field_value( $section_id, $field_id, $field_data, $sub_field_id );
+		$field_data['name'] = $this->build_field_name( $section_id, $field_id, $field_data, $sub_field_id );
+	}
+
+	private function parse_existing_field_value( $section_id, $field_id, $field_data, $sub_field_id = null ) {
+		$current_settings = &$this->registrant->current_settings;
+		$have_current = isset( $current_settings[ $section_id ] )
+			&& isset( $current_settings[ $section_id ][ $field_id ] );
+
+		if ( ! is_null( $sub_field_id ) ) {
+			$have_current = $have_current
+				&& isset( $current_settings[ $section_id ][ $field_id ][ $sub_field_id ] );
+		}
+
+		if ( ! $have_current ) {
+			$current_settings = $this->build_section_subarrays( $current_settings, $section_id, $field_id, $sub_field_id );
+
+			if ( is_null( $sub_field_id ) ) {
+				$current_settings[ $section_id ][ $field_id ] = isset( $field_data['default'] )
+					? $field_data['default']
+					: '';
+			}
+			else {
+				$current_settings[ $section_id ][ $field_id ][ $field_sub_id ] = isset( $field_data['default'] )
+					? $field_data['default']
+					: '';
+			}
+		}
+		if ( is_null( $sub_field_id ) ) {
+			$current = $current_settings[ $section_id ][ $field_id ];
+		}
+		else {
+			$current = $current_settings[ $section_id ][ $field_id ][ $sub_field_id ];
+		}
+		return $current;
+	}
+
+	private function build_section_subarrays( $current_settings, $section_id, $field_id, $sub_field_id = null ) {
+		if ( ! isset( $current_settings[ $section_id ] ) ) {
+			$current_settings[ $section_id ] = array();
+		}
+		if ( ! isset( $current_settings[ $section_id ][ $field_id ] ) ) {
+			if ( ! is_null( $sub_field_id ) ) {
+				$current_settings[ $section_id ][ $field_id ] = array();
+			}
+		}
+		return $current_settings;
+	}
+
+	private function build_field_name( $section_id, $field_id, $field_data, $sub_field_id = null ) {
+		if ( ! is_null( $sub_field_id ) ) {
+			$sub_index = '[' . $sub_field_id . ']';
+		}
+		else {
+			$sub_index = '';
+		}
+
+		$name = $this->registrant->option
+			. '[' . $section_id . ']'
+			. '[' . $field_data . ']'
+			. $sub_index;
+
+		return $name;
+	}
 
 	private function setup_registrant_entry() {
 		// Verified before this function call that name is not a duplicate
-		$this->registered_settings[ $this->registrant->name ] = array(
+		$this->registered_settings->{$this->registrant->name} = array(
 			'callbacks' => array(),
 		);
 	}
@@ -276,7 +399,7 @@ class CF_Settings {
 	private function register_settings_page_callback() {
 		$args = $this->registrant->page;
 
-		$this->registered_settings[ $this->registrant->name ]['page_callback'] =
+		$this->registered_settings->{$this->registrant->name}['page_callback'] =
 			function() use( $args ) {
 				$cf_settings = CF_Settings::get_object();
 				wp_enqueue_style(
@@ -288,19 +411,19 @@ class CF_Settings {
 			};
 	}
 
-	private function register_settings_menu() {
+	private function register_settings_menu_callback() {
 		$label = __( $this->registrant->menu['label'], 'cf_settings' );
 		$parent = $this->registrant->menu['parent'];
 		$cap = $this->registrant->menu['required_cap'];
 		$slug = sanitize_title( $this->registrant->menu['slug'] );
-		$renderer = $this->registered_settings[ $this->registrant->name ]['page_callback'];
+		$renderer = $this->registered_settings->{$this->registrant->name}['page_callback'];
 
 		if ( ! $parent ) {
 			$parent = 'menu';
 		}
 
 		if ( function_exists( 'add_' . $parent . '_page' ) ) {
-			$this->registered_settings[ $this->registrant->name ]['callbacks']['menu'] =
+			$this->registered_settings->{$this->registrant->name}['callbacks']['menu'] =
 				function() use ( $parent, $label, $cap, $slug, $renderer ) {
 					call_user_func( 'add_' . $parent . '_page',
 						$label,
@@ -325,7 +448,7 @@ class CF_Settings {
 				);
 			}
 
-			$this->registered_settings[ $this->registrant->name ]['callbacks']['menu'] =
+			$this->registered_settings->{$this->registrant->name}['callbacks']['menu'] =
 				function() use ( $parent, $label, $cap, $slug, $renderer ) {
 					add_submenu_page( $parent,
 						$label,
@@ -346,7 +469,7 @@ class CF_Settings {
 		$settings_id = $this->registrant->id;
 		$slug = $this->registrant->menu['slug'];
 
-		$this->registered_settings[ $this->registrant->name ]['callbacks']['sections'] =
+		$this->registered_settings->{$this->registrant->name}['callbacks']['sections'] =
 			function() use ( $plugin_name, $settings_group, $settings_option, $sections, $settings_id, $slug ) {
 
 				register_setting( $settings_group, $settings_option );
@@ -370,7 +493,7 @@ class CF_Settings {
 		$fields_by_section = $this->registrant->fields_by_section;
 		$settings_id = $this->registrant->id;
 
-		$this->registered_settings[ $this->registrant->name ]['callbacks']['fields'] =
+		$this->registered_settings->{$this->registrant->name}['callbacks']['fields'] =
 			function() use ( $fields_by_section, $sections, $settings_id ) {
 				foreach ( $fields_by_section as $section_id => $fields ) {
 					foreach ( $fields as $field_id => $field_data ) {
@@ -397,6 +520,42 @@ class CF_Settings {
 		};
 	}
 
+	private function init_templates() {
+		$templates = array();
+		$template_dir = $this->get_template_dir();
+		foreach ( glob( $template_dir . '*', GLOB_ONLYDIR ) as $dir ) {
+			$template_group = basename( $dir );
+			if ( ! isset( $templates[ $template_group ] ) ) {
+				$templates[ $template_group ] = array();
+			}
+			foreach ( glob( trailingslashit( $dir ) . '*.php' ) as $template ) {
+				$template_name = substr( basename( $template ), 0, -4 );
+				$templates[ $template_group ][ $template_name ] = apply_filters(
+						'cf_settings__template__' . $template_group . '__' . $template_name,
+						$file
+					);
+			}
+ 		}
+ 		$this->templates = apply_filters( 'cf_settings__templates__all', $templates );
+	}
+
+	private function get_template_dir() {
+		return trailingslashit( dirname( __FILE__ ) ) . 'assets/templates/';
+	}
+
+	private function get_template( $reference ) {
+		list( $group, $part ) = explode( '/', $reference );
+		$templates = $this->get_all_templates();
+		return $template[ $group ][ $part ];
+	}
+
+	private function get_all_templates() {
+		if ( ! isset( $this->templates ) ) {
+			$this->init_templates();
+		}
+		return $this->templates;
+	}
+
 	private function build_registrant_name() {
 		return ucwords( preg_replace( '/-_/', ' ', $this->registrant->name ) ) . ' Settings';
 	}
@@ -406,10 +565,6 @@ class CF_Settings {
 	}
 
 	private function register_warning( $type, $plugin_name, $data ) {
-
-	}
-
-	public function asdf() {
 
 	}
 
