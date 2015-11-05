@@ -50,13 +50,39 @@ class CF_Settings {
 	}
 
 	public function add_plugin_settings() {
-		$settings = apply_filters( 'cf_settings__plugin_settings', array() );
-		if ( $settings ) {
-			$this->register_settings( $settings );
+		global $wp_filter;
+
+		$settings = array();
+		foreach ( array_keys( $wp_filter ) as $hook ) {
+			if ( strpos( $hook, 'cf_settings__plugin_settings__' ) === 0 ) {
+				$plugin_name = substr( $hook, strlen( 'cf_settings__plugin_settings__' ) );
+				if ( $plugin_name ) {
+					if ( ! isset( $settings[ $plugin_name ] ) ) {
+						$settings[ $plugin_name ] = apply_filters( $hook, array() );
+					}
+					else {
+						$this->register_error(
+							'Duplicate Plugin Name',
+							$plugin_name,
+							array(
+								'registered_functions' => $wp_filter[ $hook ]
+							)
+						);
+					}
+				}
+				else {
+					$this->register_error(
+						'Invalid Hook Declaration',
+						'N/A',
+						array(
+							'filter' => $hook,
+							'registered_functions' => $wp_filter[ $hook ]
+						)
+					);
+				}
+			}
 		}
-		else {
-			$this->registered_settings = (object) array();
-		}
+		$this->register_settings( $settings );
 	}
 
 	private function register_settings( $raw_settings ) {
@@ -81,11 +107,11 @@ class CF_Settings {
 					$this->register_settings_fields_callback();
 				}
 				else {
-					$this->register_error( 'registrant_failure', $plugin_name, $plugin_data );
+					$this->register_error( 'Registrant Failure', $plugin_name, $plugin_data );
 				}
 			}
 			else {
-				$this->register_error( 'duplicate_plugin_name', $plugin_name, $plugin_data );
+				$this->register_error( 'Unexpected Duplicate Plugin Name', $plugin_name, $plugin_data );
 			}
 		}
 	}
