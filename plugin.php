@@ -3,7 +3,7 @@
  * Plugin Name: Settings API Wrap
  * Plugin URI: http://crowdfavorite.com
  * Description: Wraps the settings API into a single filter
- * Version: 0.0
+ * Version: 0.1
  * Author: Crowd Favorite
  * Author URI: http://crowdfavorite.com
  */
