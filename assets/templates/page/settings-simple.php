@@ -13,3 +13,5 @@ if (__FILE__ == $_SERVER['SCRIPT_FILENAME']) { die(); }
 		?>
 	</form>
 </div>
+
+<?php

@@ -32,3 +32,5 @@ $rel = str_replace( trailingslashit( site_url() ), '', $args['value'] );
 	<p class="description"><?php echo wp_kses( $args['description'], $allowed_tags ); ?></p>
 <?php endif; ?>
 </div>
+
+<?php

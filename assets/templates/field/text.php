@@ -27,3 +27,5 @@ if (__FILE__ == $_SERVER['SCRIPT_FILENAME']) { die(); }
 	<p class="description"><?php echo wp_kses( $args['description'], $allowed_tags ); ?></p>
 <?php endif; ?>
 </div>
+
+<?php

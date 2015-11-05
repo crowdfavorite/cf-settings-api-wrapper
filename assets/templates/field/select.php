@@ -3,11 +3,11 @@
 if (__FILE__ == $_SERVER['SCRIPT_FILENAME']) { die(); }
 
 if ( ! $args['options'] ) {
+	// Let the invalid_args template know what we're missing
 	$args['missing_fields'] = array(
 		'options'
 	);
-	$do_template = D23_Membership_Config::field_type_callback( 'invalid_args' );
-	$do_template( $args );
+	include dirname(__FILE__) . '/invalid_args.php';
 }
 else {
 ?>
@@ -25,7 +25,7 @@ else {
 	>
 	<?php foreach ( $args['options'] as $option => $option_value ) :
 			?>
-		<option value="<?php echo $option;?>" <?php selected( $option, $args['value'] );?>"><?php echo $option_value; ?></option>
+		<option value="<?php echo $option;?>" <?php selected( $option, $args['value'] );?>><?php echo $option_value; ?></option>
 			<?php
 		endforeach;
 	?>

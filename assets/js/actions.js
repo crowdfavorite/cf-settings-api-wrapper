@@ -66,9 +66,13 @@
 
 		$target.val(val);
 
-		if (val) {
+		if ($this.val()) {
 			$display.find('.empty')
 				.removeClass('empty');
+		}
+		else {
+			$display.find('span')
+				.addClass('empty');
 		}
 
 		$display
