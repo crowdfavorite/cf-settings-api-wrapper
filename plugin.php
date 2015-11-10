@@ -743,11 +743,22 @@ class CF_Settings {
 	}
 
 	private static function register_error( $msg, $plugin_name, $data ) {
-
+		error_log(
+			'Error setting up CF_Settings for: `' . $plugin_name . "`\n"
+			. 'Attached message: `' . $msg . '`' . "\n"
+			. 'Provided data:' . "\n"
+			. print_r( $data, 1 )
+		);
+		die;
 	}
 
 	private static function register_warning( $msg, $plugin_name, $data ) {
-
+		error_log(
+			'CF_Settings warning: `' . $msg . '`' . "\n"
+			. 'Affecting the plugin `' . $plugin_name . '`' . "\n"
+			. 'Attached data:' . "\n"
+			. print_r( $data, 1 )
+		);
 	}
 
 	public static function get_settings_stylesheet() {
