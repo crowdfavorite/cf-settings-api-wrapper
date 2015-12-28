@@ -9,6 +9,7 @@
  */
 
 if (__FILE__ == $_SERVER['SCRIPT_FILENAME']) { die(); }
+if ( ! class_exists( 'CF_Settings' ) ) {
 
 class CF_Settings {
 	private static $registered_settings;
@@ -124,7 +125,7 @@ class CF_Settings {
 				);
 			}
 			else {
-				$this->register_error(
+				CF_Settings::register_error(
 					'Invalid Plugin Settings',
 					$plugin_name,
 					$plugin_data
@@ -500,7 +501,7 @@ class CF_Settings {
 					CF_Settings::get_settings_stylesheet()
 				);
 				$args = CF_Settings::fill_all_placeholders( apply_filters(
-					'cf_setting__page_template_args', $args, $args['template']
+					'cf_settings__page_template_args', $args, $args['template']
 				) );
 				wp_enqueue_script(
 					'cf_settings_actions',
@@ -520,6 +521,10 @@ class CF_Settings {
 
 		if ( ! $parent ) {
 			$parent = 'menu';
+		}
+		// Misnomered menu item
+		if ( $parent == 'settings' ) {
+			$parent = 'options';
 		}
 		// add_submenu_page wrappers that exist as of WordPress 4.3.1
 		$submenu_helpers = array(
@@ -551,7 +556,7 @@ class CF_Settings {
 		}
 		/**
 		*  Otherwise try to put it under a post type menu. Any custom top level menu is safe, but we
-		*  can't know what the'll be so we'll just issue a warning that says we don't know if the
+		*  can't know what they'll be so we'll just issue a warning that says we don't know if the
 		*  parent provided is valid.
 		*/
 		else {
@@ -757,10 +762,12 @@ class CF_Settings {
 		return CF_Settings::$assets_url;
 	}
 
-	private static function get_actions_script() {
+	public static function get_actions_script() {
 		$assets = CF_Settings::get_assets_url();
 		return apply_filters( 'cf_settings__default_actions_script', $assets . 'js/actions.js' );
 	}
 
 }
 add_action( 'plugins_loaded', 'CF_Settings::add_plugin_settings' );
+
+}

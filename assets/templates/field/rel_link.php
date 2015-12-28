@@ -21,6 +21,10 @@ $rel = str_replace( trailingslashit( site_url() ), '', $args['value'] );
 			value="<?php echo esc_attr( $args['value'] ); ?>"
 			size="50"
 			style="display:none !important;"
+			<?php if ( isset( $args['actions'] ) && $args['actions'] ) : ?>
+				has-action
+				actions="<?php foreach ( $args['actions'] as $action ) { echo $action; } ?>"
+			<?php endif; ?>
 		/>
 		<div class="js-click-to-edit click-to-edit">
 			<span class="<?php if ( ! $rel ) echo 'empty'; ?>">

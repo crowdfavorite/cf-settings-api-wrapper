@@ -22,6 +22,10 @@ if (__FILE__ == $_SERVER['SCRIPT_FILENAME']) { die(); }
 		name="<?php echo esc_attr( $args['name'] ); ?>"
 		value="<?php echo esc_attr( $args['value'] ); ?>"
 		size="50"
+		<?php if ( isset( $args['actions'] ) && $args['actions'] ) : ?>
+			has-action
+			actions="<?php foreach ( $args['actions'] as $action ) { echo $action; } ?>"
+		<?php endif; ?>
 	/>
 <?php if ( isset( $args['description'] ) ): ?>
 	<p class="description"><?php echo wp_kses( $args['description'], $allowed_tags ); ?></p>

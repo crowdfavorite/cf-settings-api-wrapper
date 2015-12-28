@@ -15,6 +15,10 @@ if (__FILE__ == $_SERVER['SCRIPT_FILENAME']) { die(); }
 		name="<?php echo $args['name']; ?>"
 		type="checkbox"
 		value="1"
+		<?php if ( isset( $args['actions'] ) && $args['actions'] ) : ?>
+			has-action
+			actions="<?php foreach ( $args['actions'] as $action ) { echo $action; } ?>"
+		<?php endif; ?>
 	<?php if ( isset( $args['classes'] ) && $args['classes'] ): ?>
 		class="<?php echo implode( ' ', $args['classes'] ); ?>"
 	<?php endif; ?>

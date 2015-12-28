@@ -22,6 +22,10 @@ else {
 		id="<?php echo esc_attr( $args['name'] ); ?>"
 		name="<?php echo esc_attr( $args['name'] ); ?>"
 		value="<?php echo esc_attr( $args['value'] ); ?>"
+		<?php if ( isset( $args['actions'] ) && $args['actions'] ) : ?>
+			has-action
+			actions="<?php foreach ( $args['actions'] as $action ) { echo $action; } ?>"
+		<?php endif; ?>
 	>
 	<?php foreach ( $args['options'] as $option => $option_value ) :
 			?>
